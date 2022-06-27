@@ -22,7 +22,7 @@ class Organisation(Entity):
         self.data_dict = row.to_dict()
 
     def make_id(self, entity):
-        entity.id = self.data_dict.get('innCode', get_unique_id())
+        entity.id = self.data_dict.get('ogrnCode', get_unique_id())
         return entity
 
     def fix_na(self, row):
