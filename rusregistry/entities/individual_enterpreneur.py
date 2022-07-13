@@ -22,7 +22,7 @@ class IndividualEnterpereneur(Entity):
         self.data_dict = row.to_dict()
 
     def make_id(self, entity):
-        entity.id = self.data_dict.get('innCode', get_unique_id())
+        entity.id = self.add_id_prefix(self.data_dict['innCode'], 'inn')
         return entity
 
     def fix_na(self, row):

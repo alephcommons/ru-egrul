@@ -28,5 +28,5 @@ class Person(Entity):
         return row
 
     def make_id(self, entity):
-        entity.id = self.data_dict.get('innCode', get_unique_id())
+        entity.id = self.add_id_prefix(self.data_dict['innCode'], 'inn')
         return entity

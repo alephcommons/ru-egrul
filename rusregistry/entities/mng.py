@@ -8,11 +8,15 @@ class ManagingCompany(ConnectionEntity):
 
     def from_csv_row(self, row: pd.core.series.Series):
         row = self.fix_date(row)
-        self.data_dict = {'director': str(row['mng_ogrn']),
-                          'organization': str(row['ogrn']),
+
+        director_id = self.add_id_prefix(row['mng_ogrn'], 'ogrn')
+        organisation_id = self.add_id_prefix(row['ogrn'], 'ogrn')
+
+        self.data_dict = {'director': director_id,
+                          'organization': organisation_id,
                           'role': 'Managing Company',
                           'startDate': row['cdate_num']}
 
     def make_id(self, entity):
-        entity.id = self.data_dict['director'] + 'mng' + self.data_dict['organization']
+        entity.id = f"{self.data_dict['director']}-mng-{self.data_dict['organization']}"
         return entity

@@ -6,7 +6,7 @@ import followthemoney as ftm
 
 def get_unique_id():
     # This should be fixed
-    return random.sample(string.ascii_letters, 24)
+    return ''.join(random.sample(string.ascii_letters, 24))
 
 class Entity:
     def __init__(self, item):
@@ -19,8 +19,11 @@ class Entity:
     def from_csv_row(self, row: pd.core.series.Series):
         self.data_dict = row.to_dict()
 
+    def add_id_prefix(self, item_id, prefix='ogrn'):
+        return f"ru-{prefix}-{item_id}"
+
     def make_id(self, entity):
-        entity.make_id(self.data_dict.get('id', get_unique_id()))
+        entity.id = self.add_id_prefix(get_unique_id(), 'other')
         return entity
 
     def set_property(self, property_name, property_value):

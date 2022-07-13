@@ -1,6 +1,7 @@
-from entities.entity import Entity
+from entities.entity import Entity, get_unique_id
 from utils.column_mapping import LOCATION_MAPPING
 import pandas as pd
+
 
 class Address(Entity):
     def __init__(self, item):
@@ -14,12 +15,11 @@ class Address(Entity):
         return row.rename(LOCATION_MAPPING, axis=0)
 
     def from_csv_row(self, row: pd.core.series.Series):
-        row = self.fix_na(row)
+        # row = self.fix_na(row)
         row = self.update_column_names(row)
         row = row[self.properties]
         self.data_dict = row.to_dict()
 
-    def fix_na(self, row):
-        # TODO map all 'as NA' values to NA
-        row = row.fillna('na')
-        return row
+    def make_id(self, entity):
+        entity.id = self.add_id_prefix(get_unique_id(), 'address')
+        return entity

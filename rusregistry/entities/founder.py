@@ -12,16 +12,16 @@ class Founder(ConnectionEntity):
         row['founder_inn'] = fix_inn(row['founder_inn'])
 
 
-        founder = str(row['founder_inn'] if row['founder_ogrn'] == 0 else row['founder_ogrn'])
+        founder_id = self.add_id_prefix(row['founder_inn'], 'inn') if row['founder_ogrn'] == 0 \
+                                     else self.add_id_prefix(row['founder_ogrn'], 'ogrn')
         row = self.fix_date(row)
-
-
-        self.data_dict = {'owner': founder,
-                          'asset': str(row['ogrn']),
+        asset_id = self.add_id_prefix(row['ogrn'], 'ogrn')
+        self.data_dict = {'owner': founder_id,
+                          'asset': asset_id,
                           'percentage': row['capital_p'],
                           'sharesValue': row['capital'],
                           'startDate': row['cdate_num']}
 
     def make_id(self, entity):
-        entity.id = self.data_dict['owner'] + 'founder' + self.data_dict['asset']
+        entity.id = f"{self.data_dict['owner']}-founder-{self.data_dict['asset']}"
         return entity

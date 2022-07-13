@@ -6,12 +6,17 @@ class Succession(ConnectionEntity):
         super().__init__(item)
         self.entity_type = 'Succession'
 
+
+
     def from_csv_row(self, row: pd.core.series.Series):
         row = self.fix_date(row)
-        self.data_dict = {'predecessor': str(row['predecessor_ogrn']),
-                          'successor': str(row['ogrn']),
+        predecessor_id = self.add_id_prefix(row['predecessor_ogrn'], 'ogrn')
+        sucessor_id = self.add_id_prefix(row['ogrn'], 'ogrn')
+
+        self.data_dict = {'predecessor': predecessor_id,
+                          'successor': sucessor_id,
                           'date': row['cdate_num']}
 
     def make_id(self, entity):
-        entity.id = self.data_dict['successor'] + 'sucessor' + self.data_dict['predecessor']
+        entity.id = f"{self.data_dict['successor']}-sucessor-{self.data_dict['predecessor']}"
         return entity
