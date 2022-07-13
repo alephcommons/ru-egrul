@@ -1,3 +1,6 @@
+from parsel import Selector
+import requests
+from urllib.parse import urljoin, unquote
 
 def bytes_to_date(d):
     d = int(d)
@@ -11,3 +14,14 @@ def fix_inn(inn):
     if len(inn) in {9, 11}:
         return '0'+inn
     return inn
+
+
+def get_file_links(uri):
+        egrul = requests.get(uri)
+        sel = Selector(egrul.text)
+
+        return [
+            urljoin(uri, unquote(link))
+            for link in sel.css("a::attr(href)").extract()
+            if link.endswith("zip") or link.endswith("csv")
+        ]
