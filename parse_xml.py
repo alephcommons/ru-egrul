@@ -1,4 +1,3 @@
-from audioop import add
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urljoin, urlparse
 from zipfile import ZipFile
@@ -166,9 +165,6 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
     if owner.id is None:
         return
 
-    # pprint(owner.to_dict())
-    context.emit(owner)
-
     ownership.id = context.make_id(company.id, owner.id)
     ownership.add("owner", owner)
     ownership.add("asset", company)
@@ -183,6 +179,9 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
     reliable_el = el.find("./СвНедДанУчр")
     if reliable_el is not None:
         ownership.add("summary", reliable_el.get("ТекстНедДанУчр"))
+
+    # pprint(owner.to_dict())
+    context.emit(owner)
 
     # pprint(ownership.to_dict())
     context.emit(ownership)
@@ -368,6 +367,6 @@ def crawl_parallel(context: Zavod):
 
 if __name__ == "__main__":
     with init_context("ru_egrul", "ru") as context:
-        # crawl_parallel(context)
-        crawl(context)
+        crawl_parallel(context)
+        # crawl(context)
         # parse_examples(context)
