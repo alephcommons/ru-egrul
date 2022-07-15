@@ -48,18 +48,28 @@ def make_id(
     return None
 
 
-def make_person(context: Zavod, el: Element, local_id: str) -> EntityProxy:
+def make_person(context: Zavod, el: Element, local_id: str) -> Optional[EntityProxy]:
+    name_el = el.find("./СвФЛ")
     entity = context.make("Person")
-    last_name = el.get("Фамилия")
-    first_name = el.get("Имя")
-    patronymic = el.get("Отчество")
+    if name_el is None:
+        return None
+    last_name = name_el.get("Фамилия")
+    first_name = name_el.get("Имя")
+    patronymic = name_el.get("Отчество")
     name = join_text(first_name, patronymic, last_name)
     entity.add("name", name)
     entity.add("firstName", first_name)
     entity.add("fatherName", patronymic)
     entity.add("lastName", last_name)
-    entity.add("innCode", el.get("ИННФЛ"))
+    entity.add("innCode", name_el.get("ИННФЛ"))
     entity.id = make_id(context, entity, local_id)
+
+    country = el.find("./СвГраждФЛ")
+    if country is not None:
+        if country.get("КодГражд") == "1":
+            entity.add("country", "ru")
+        entity.add("country", country.get("НаимСтран"))
+
     return entity
 
 
@@ -86,17 +96,6 @@ def make_org(context: Zavod, el: Element, local_id: str) -> EntityProxy:
     return entity
 
 
-def apply_person_country(person: EntityProxy, el: Element):
-    country = el.find("./СвГраждФЛ")
-    if country is None:
-        return
-
-    if country.get("КодГражд") == "1":
-        person.add("country", "ru")
-
-    person.add("country", country.get("НаимСтран"))
-
-
 def parse_founder(context: Zavod, company: EntityProxy, el: Element):
     owner = context.make("LegalEntity")
     ownership = context.make("Ownership")
@@ -108,11 +107,9 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         local_id = meta.get("ГРН")
 
     if el.tag == "УчрФЛ":  # Individual founder
-        name_el = el.find("./СвФЛ")
-        if name_el is not None:
-            owner = make_person(context, name_el, local_id)
-
-        apply_person_country(owner, el)
+        owner_proxy = make_person(context, el, local_id)
+        if owner_proxy is not None:
+            owner = owner_proxy
     elif el.tag == "УчрЮЛИн":  # Foreign company
         owner = make_org(context, el, local_id)
     elif el.tag == "УчрЮЛРос":  # Russian legal entity
@@ -163,6 +160,7 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         return
 
     if owner.id is None:
+        context.log.warning("No ID for owner: %s" % company.id, el=tag_text(el))
         return
 
     ownership.id = context.make_id(company.id, owner.id)
@@ -188,15 +186,11 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
 
 
 def parse_directorship(context: Zavod, company: EntityProxy, el: Element):
-    name = el.find("./СвФЛ")
-    if name is None:
+    # TODO: can we use the ГРН as a fallback ID?
+    director = make_person(context, el, company.id)
+    if director is None:
         # context.log.warn("Directorship has no person", company=company.id)
         return
-    # TODO: can we use the ГРН as a fallback ID?
-    director = make_person(context, name, company.id)
-
-    # TODO: move this into make_person?
-    apply_person_country(director, el)
 
     context.emit(director)
 
