@@ -37,6 +37,29 @@ def make_person(context: Zavod, el: Element, local_id: str) -> EntityProxy:
     return entity
 
 
+def make_org(context: Zavod, el: Element, local_id: str) -> EntityProxy:
+    entity = context.make("Organization")
+    name_el = el.find("./НаимИННЮЛ")
+    if name_el is not None:
+        entity.add("name", name_el.get("НаимЮЛПолн"))
+        entity.add("innCode", name_el.get("ИНН"))
+        entity.id = context.make_slug("inn", name_el.get("ИНН"))
+        entity.add("ogrnCode", name_el.get("ОГРН"))
+
+    name_latin_el = el.find("./СвНаимЮЛПолнИн")
+    if name_latin_el is not None:
+        entity.add("name", name_latin_el.get("НаимПолн"))
+
+    foreign_reg_el = el.find("./СвРегИн")
+    if foreign_reg_el is not None:
+        entity.add("jurisdiction", foreign_reg_el.get("НаимСтран"))
+        entity.add("registrationNumber", foreign_reg_el.get("РегНомер"))
+        entity.add("publisher", foreign_reg_el.get("НаимРегОрг"))
+        entity.add("address", foreign_reg_el.get("АдрСтр"))
+
+    return entity
+
+
 def apply_person_country(person: EntityProxy, el: Element):
     country = el.find("./СвГраждФЛ")
     if country is None:
@@ -50,37 +73,48 @@ def apply_person_country(person: EntityProxy, el: Element):
 
 def parse_founder(context: Zavod, company: EntityProxy, el: Element):
     owner = context.make("LegalEntity")
+    ownership = context.make("Ownership")
+
+    meta = el.find("./ГРНДатаПерв")
+    local_id = company.id
+    if meta is not None:
+        ownership.add("startDate", meta.get("ДатаЗаписи"))
+        local_id = meta.get("ГРН")
+
     if el.tag == "УчрФЛ":  # Individual founder
         name_el = el.find("./СвФЛ")
         if name_el is not None:
-            owner = make_person(context, name_el, company.id)
+            owner = make_person(context, name_el, local_id)
 
         apply_person_country(owner, el)
     elif el.tag == "УчрЮЛИн":  # Foreign company
-        name_el = el.find("./НаимИННЮЛ")
-        if name_el is not None:
-            owner.add("name", name_el.get("НаимЮЛПолн"))
-
-        name_latin_el = el.find("./СвНаимЮЛПолнИн")
-        if name_latin_el is not None:
-            owner.add("name", name_latin_el.get("НаимПолн"))
-
-        foreign_reg_el = el.find("./СвРегИн")
-        if foreign_reg_el is not None:
-            owner.add("jurisdiction", foreign_reg_el.get("НаимСтран"))
-            owner.add("registrationNumber", foreign_reg_el.get("РегНомер"))
-            owner.add("publisher", foreign_reg_el.get("НаимРегОрг"))
-            owner.add("address", foreign_reg_el.get("АдрСтр"))
-        print(tag_text(el))
-        pass
+        owner = make_org(context, el, local_id)
     elif el.tag == "УчрЮЛРос":  # Russian legal entity
+        # print(tag_text(el))
         pass
     elif el.tag == "УчрПИФ":  # Mutual investment fund
+        owner = context.make("Security")
+        # TODO: nested ownership structure, make Security
+        fund_name_el = el.find("./СвНаимПИФ")
+        if fund_name_el is not None:
+            owner.add("name", fund_name_el.get("НаимПИФ"))
+
+        # FIXME: Security cannot own.
+        # print(tag_text(el))
         pass
     elif el.tag == "УчрРФСубМО":  # Russian public body
-        pass
+        pb_name_el = el.find("./ВидНаимУчр")
+        if pb_name_el is not None:
+            # Name of the owning authority
+            ownership.add("role", pb_name_el.get("НаимМО"))
+
+        # managing body:
+        pb_el = el.find("./СвОргОсущПр")
+        if pb_el is not None:
+            owner = make_org(context, pb_el, local_id)
     else:
         context.log.warn("Unknown owner type", tag=el.tag)
+        return
 
     if owner.id is None:
         return
@@ -88,7 +122,6 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
     # pprint(owner.to_dict())
     context.emit(owner)
 
-    ownership = context.make("Ownership")
     ownership.id = context.make_id(company.id, owner.id)
     ownership.add("owner", owner)
     ownership.add("asset", company)
@@ -99,10 +132,6 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         percent_el = share_el.find("./РазмерДоли/Процент")
         if percent_el is not None:
             ownership.add("percentage", percent_el.text)
-
-    date = el.find("./ГРНДатаПерв")
-    if date is not None:
-        ownership.add("startDate", date.get("ДатаЗаписи"))
 
     # pprint(ownership.to_dict())
     context.emit(ownership)
@@ -142,13 +171,16 @@ def parse_directorship(context: Zavod, company: EntityProxy, el: Element):
 
 def parse_company(context: Zavod, el: Element):
     entity = context.make("Company")
-    entity.id = context.make_slug("ogrn", el.get("ОГРН"))
+    entity.id = context.make_slug("inn", el.get("ИНН"))
     entity.add("jurisdiction", "ru")
     entity.add("ogrnCode", el.get("ОГРН"))
     entity.add("innCode", el.get("ИНН"))
     entity.add("kppCode", el.get("КПП"))
     entity.add("legalForm", el.get("ПолнНаимОПФ"))
     entity.add("incorporationDate", el.get("ДатаОГРН"))
+
+    if el.get("ИНН") is None:
+        print(tag_text(el))
 
     for name_el in el.findall("./СвНаимЮЛ"):
         entity.add("name", name_el.get("НаимЮЛПолн"))
@@ -169,26 +201,9 @@ def parse_company(context: Zavod, el: Element):
     context.emit(entity)
 
 
-## FOUnder:
-# <СвУчредит>
-# <УчрФЛ>
-# <ГРНДатаПерв ГРН="2047709040180" ДатаЗаписи="2004-06-25"/>
-# <СвФЛ Фамилия="ТАРАСОВ" Имя="ИГОРЬ" Отчество="АЛЕКСАНДРОВИЧ" ИННФЛ="770300584079">
-# <ГРНДата ГРН="2047709040180" ДатаЗаписи="2004-06-25"/>
-# </СвФЛ>
-# <ДоляУстКап НоминСтоим="10000">
-# <РазмерДоли>
-# <Процент>100</Процент>
-# </РазмерДоли>
-# <ГРНДата ГРН="7137747735085" ДатаЗаписи="2013-09-10"/>
-# </ДоляУстКап>
-# </УчрФЛ>
-# </СвУчредит>
-
-
 def parse_sole_trader(context: Zavod, el: Element):
-    entity = context.make("Company")
-    entity.id = context.make_slug("ogrn", el.get("ОГРНИП"))
+    entity = context.make("LegalEntity")
+    entity.id = context.make_slug("inn", el.get("ИННФЛ"))
     entity.add("country", "ru")
     entity.add("ogrnCode", el.get("ОГРНИП"))
     entity.add("innCode", el.get("ИННФЛ"))
