@@ -2,7 +2,7 @@ from urllib.parse import urljoin, urlparse
 from zipfile import ZipFile
 from lxml import etree, html
 from pprint import pprint
-from typing import BinaryIO, Set
+from typing import BinaryIO, Optional, Set
 from lxml.etree import _Element as Element, tostring
 from zavod import Zavod, init_context
 from followthemoney.proxy import EntityProxy
@@ -16,6 +16,21 @@ def tag_text(el: Element) -> str:
     return tostring(el, encoding="utf-8").decode("utf-8")
 
 
+def make_id(
+    context: Zavod, entity: EntityProxy, local_id: Optional[str] = None
+) -> Optional[str]:
+    # FIXME: should we make INN slugs if the nationality is not Russian?
+    for inn in sorted(entity.get("innCode", quiet=True)):
+        return context.make_slug("inn", inn)
+    for ogrn in sorted(entity.get("ogrnCode", quiet=True)):
+        return context.make_slug("ogrn", ogrn)
+    if local_id is not None:
+        # If no INN is present, make a fake entity ID:
+        for name in sorted(entity.get("name")):
+            return context.make_id(local_id, name)
+    return None
+
+
 def make_person(context: Zavod, el: Element, local_id: str) -> EntityProxy:
     entity = context.make("Person")
     last_name = el.get("Фамилия")
@@ -26,14 +41,8 @@ def make_person(context: Zavod, el: Element, local_id: str) -> EntityProxy:
     entity.add("firstName", first_name)
     entity.add("fatherName", patronymic)
     entity.add("lastName", last_name)
-    inn = el.get("ИННФЛ")
-    if inn:
-        # FIXME: should we make INN slugs if the nationality is not Russian?
-        entity.id = context.make_slug("inn", inn)
-        entity.add("innCode", inn)
-    else:
-        # If no INN is present, make a fake entity ID:
-        entity.id = context.make_id(local_id, name)
+    entity.add("innCode", el.get("ИННФЛ"))
+    entity.id = make_id(context, entity, local_id)
     return entity
 
 
@@ -43,7 +52,6 @@ def make_org(context: Zavod, el: Element, local_id: str) -> EntityProxy:
     if name_el is not None:
         entity.add("name", name_el.get("НаимЮЛПолн"))
         entity.add("innCode", name_el.get("ИНН"))
-        entity.id = context.make_slug("inn", name_el.get("ИНН"))
         entity.add("ogrnCode", name_el.get("ОГРН"))
 
     name_latin_el = el.find("./СвНаимЮЛПолнИн")
@@ -57,6 +65,7 @@ def make_org(context: Zavod, el: Element, local_id: str) -> EntityProxy:
         entity.add("publisher", foreign_reg_el.get("НаимРегОрг"))
         entity.add("address", foreign_reg_el.get("АдрСтр"))
 
+    entity.id = make_id(context, entity, local_id)
     return entity
 
 
@@ -91,17 +100,22 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         owner = make_org(context, el, local_id)
     elif el.tag == "УчрЮЛРос":  # Russian legal entity
         # print(tag_text(el))
-        pass
+        owner = make_org(context, el, local_id)
     elif el.tag == "УчрПИФ":  # Mutual investment fund
-        owner = context.make("Security")
         # TODO: nested ownership structure, make Security
+        # owner = context.make("Security")
+        # FIXME: Security cannot own.
         fund_name_el = el.find("./СвНаимПИФ")
         if fund_name_el is not None:
-            owner.add("name", fund_name_el.get("НаимПИФ"))
+            # owner.add("name", fund_name_el.get("НаимПИФ"))
+            ownership.add("summary", fund_name_el.get("НаимПИФ"))
 
-        # FIXME: Security cannot own.
-        # print(tag_text(el))
-        pass
+        manager_el = el.find("./СвУпрКомпПИФ/УпрКомпПиф")
+        if manager_el is not None:
+            owner.add("name", manager_el.get("НаимЮЛПолн"))
+            owner.add("innCode", manager_el.get("ИНН"))
+            owner.add("ogrnCode", manager_el.get("ОГРН"))
+            owner.id = make_id(context, owner, local_id)
     elif el.tag == "УчрРФСубМО":  # Russian public body
         pb_name_el = el.find("./ВидНаимУчр")
         if pb_name_el is not None:
@@ -112,6 +126,21 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         pb_el = el.find("./СвОргОсущПр")
         if pb_el is not None:
             owner = make_org(context, pb_el, local_id)
+    elif el.tag == "УчрДогИнвТов":  # investment partnership agreement.
+        # FIXME: should the partnership be its own entity?
+        terms_el = el.find("./ИнПрДогИнвТов")
+        if terms_el is not None:
+            ownership.add("summary", terms_el.get("НаимДог"))
+            ownership.add("recordId", terms_el.get("НомерДог"))
+            ownership.add("date", terms_el.get("Дата"))
+
+        # managing vehicle
+        manager_el = el.find("./СвУпТовЮЛ")
+        if manager_el is not None:
+            owner.add("name", manager_el.get("НаимЮЛПолн"))
+            owner.add("innCode", manager_el.get("ИНН"))
+            owner.add("ogrnCode", manager_el.get("ОГРН"))
+            owner.id = make_id(context, owner, local_id)
     else:
         context.log.warn("Unknown owner type", tag=el.tag)
         return
@@ -133,6 +162,10 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         if percent_el is not None:
             ownership.add("percentage", percent_el.text)
 
+    reliable_el = el.find("./СвНедДанУчр")
+    if reliable_el is not None:
+        ownership.add("summary", reliable_el.get("ТекстНедДанУчр"))
+
     # pprint(ownership.to_dict())
     context.emit(ownership)
 
@@ -140,7 +173,7 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
 def parse_directorship(context: Zavod, company: EntityProxy, el: Element):
     name = el.find("./СвФЛ")
     if name is None:
-        context.log.warn("Directorship has no person", tag=tag_text(el))
+        # context.log.warn("Directorship has no person", company=company.id)
         return
     # TODO: can we use the ГРН as a fallback ID?
     director = make_person(context, name, company.id)
@@ -179,12 +212,36 @@ def parse_company(context: Zavod, el: Element):
     entity.add("legalForm", el.get("ПолнНаимОПФ"))
     entity.add("incorporationDate", el.get("ДатаОГРН"))
 
-    if el.get("ИНН") is None:
-        print(tag_text(el))
+    email_el = el.find("./СвАдрЭлПочты")
+    if email_el is not None:
+        entity.add("email", email_el.get("E-mail"))
+
+    citizen_el = el.find("./СвГражд")
+    if citizen_el is not None:
+        entity.add("country", citizen_el.get("НаимСтран"))
+
+    # TODO: address:
+    # * СвАдрЮЛФИАС
+    # * СвАдресЮЛ / АдресРФ
+    for addr_el in el.findall("./СвАдресЮЛ/*"):
+        if addr_el.tag == "АдресРФ":  # normal address
+            pass
+        elif addr_el.tag == "СвМНЮЛ":  # location of legal entity
+            pass
+        elif addr_el.tag == "СвАдрЮЛФИАС":
+            pass
+        elif addr_el.tag == "СвНедАдресЮЛ":  # missing address
+            pass
+        elif addr_el.tag == "СвРешИзмМН":  # address change
+            pass
+        else:
+            print(tag_text(addr_el))
 
     for name_el in el.findall("./СвНаимЮЛ"):
         entity.add("name", name_el.get("НаимЮЛПолн"))
         entity.add("name", name_el.get("НаимЮЛСокр"))
+
+    entity.id = make_id(context, entity)
 
     # prokura or directors etc.
     for director in el.findall("./СведДолжнФЛ"):
@@ -193,22 +250,18 @@ def parse_company(context: Zavod, el: Element):
     for founder in el.findall("./СвУчредит/*"):
         parse_founder(context, entity, founder)
 
-    # TODO: address:
-    # * СвАдрЮЛФИАС
-    # * СвАдресЮЛ / АдресРФ
-
     # pprint(entity.to_dict())
     context.emit(entity)
 
 
 def parse_sole_trader(context: Zavod, el: Element):
     entity = context.make("LegalEntity")
-    entity.id = context.make_slug("inn", el.get("ИННФЛ"))
     entity.add("country", "ru")
     entity.add("ogrnCode", el.get("ОГРНИП"))
     entity.add("innCode", el.get("ИННФЛ"))
     entity.add("legalForm", el.get("НаимВидИП"))
 
+    entity.id = make_id(context, entity)
     context.emit(entity)
 
 
@@ -245,6 +298,7 @@ def crawl_index(context: Zavod, url: str) -> Set[str]:
 def crawl_archive(context: Zavod, url: str):
     url_path = urlparse(url).path.lstrip("/")
     path = context.fetch_resource(url_path, url)
+    context.log.info("Crawling: %s" % url_path)
     with ZipFile(path, "r") as zip:
         for name in zip.namelist():
             if not name.lower().endswith(".xml"):
