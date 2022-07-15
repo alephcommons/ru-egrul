@@ -1,19 +1,37 @@
+from audioop import add
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urljoin, urlparse
 from zipfile import ZipFile
 from lxml import etree, html
 from pprint import pprint
-from typing import BinaryIO, Optional, Set
+from typing import BinaryIO, Dict, Optional, Set
 from lxml.etree import _Element as Element, tostring
 from zavod import Zavod, init_context
 from followthemoney.proxy import EntityProxy
 from followthemoney.util import join_text
+from addressformatting import AddressFormatter
 
 INN_URL = "https://egrul.itsoft.ru/%s.xml"
 PREFIX = "https://egrul.itsoft.ru/EGRUL_406/01.01.2022_FULL/"
+aformatter = AddressFormatter()
 
 
 def tag_text(el: Element) -> str:
     return tostring(el, encoding="utf-8").decode("utf-8")
+
+
+def dput(data: Dict[str, Optional[str]], name: str, value: Optional[str]):
+    if value is None or not len(value.strip()):
+        return
+    dd = value.replace("-", "")
+    if not len(dd.strip()):
+        return
+    data[name] = value
+
+
+def elattr(el: Optional[Element], attr: str):
+    if el is not None:
+        return el.get(attr)
 
 
 def make_id(
@@ -202,6 +220,49 @@ def parse_directorship(context: Zavod, company: EntityProxy, el: Element):
     context.emit(directorship)
 
 
+def parse_address(context: Zavod, entity: EntityProxy, el: Element):
+    data: Dict[str, Optional[str]] = {}
+    country = "ru"
+    if el.tag == "АдресРФ":  # normal address
+        # print(tag_text(el))
+        pass
+    elif el.tag == "СвМНЮЛ":  # location of legal entity
+        # print(tag_text(el))
+        pass
+    elif el.tag == "СвАдрЮЛФИАС":  # special structure?
+        # print(tag_text(el))
+        pass
+    elif el.tag == "СвНедАдресЮЛ":  # missing address
+        # print(el.get("ТекстНедАдресЮЛ"))
+        return None  # ignore this one entirely
+    elif el.tag == "СвРешИзмМН":  # address change
+        # print(tag_text(el))
+        # print(el.get("ТекстРешИзмМН"))
+        pass
+    else:
+        context.log.warn("Unknown address type", tag=el.tag)
+        return
+
+    # FIXME: this is a complete mess
+    dput(data, "postcode", el.get("Индекс"))
+    dput(data, "postcode", el.get("ИдНом"))
+    dput(data, "house", el.get("Дом"))
+    dput(data, "house_number", el.get("Корпус"))
+    dput(data, "neighbourhood", el.get("Кварт"))
+    dput(data, "neighbourhood", el.get("Кварт"))
+    dput(data, "city", el.findtext("./НаимРегион"))
+    dput(data, "city", elattr(el.find("./Регион"), "НаимРегион"))
+    dput(data, "state", elattr(el.find("./Район"), "НаимРайон"))
+    dput(data, "town", elattr(el.find("./НаселПункт"), "НаимНаселПункт"))
+    dput(data, "municipality", elattr(el.find("./МуниципРайон"), "Наим"))
+    dput(data, "suburb", elattr(el.find("./НаселенПункт"), "Наим"))
+    dput(data, "road", elattr(el.find("./ЭлУлДорСети"), "Наим"))
+    dput(data, "road", elattr(el.find("./Улица"), "НаимУлица"))
+    dput(data, "house", elattr(el.find("./ПомещЗдания"), "Номер"))
+    address = aformatter.one_line(data, country=country)
+    entity.add("address", address)
+
+
 def parse_company(context: Zavod, el: Element):
     entity = context.make("Company")
     entity.id = context.make_slug("inn", el.get("ИНН"))
@@ -220,22 +281,8 @@ def parse_company(context: Zavod, el: Element):
     if citizen_el is not None:
         entity.add("country", citizen_el.get("НаимСтран"))
 
-    # TODO: address:
-    # * СвАдрЮЛФИАС
-    # * СвАдресЮЛ / АдресРФ
     for addr_el in el.findall("./СвАдресЮЛ/*"):
-        if addr_el.tag == "АдресРФ":  # normal address
-            pass
-        elif addr_el.tag == "СвМНЮЛ":  # location of legal entity
-            pass
-        elif addr_el.tag == "СвАдрЮЛФИАС":
-            pass
-        elif addr_el.tag == "СвНедАдресЮЛ":  # missing address
-            pass
-        elif addr_el.tag == "СвРешИзмМН":  # address change
-            pass
-        else:
-            print(tag_text(addr_el))
+        parse_address(context, entity, addr_el)
 
     for name_el in el.findall("./СвНаимЮЛ"):
         entity.add("name", name_el.get("НаимЮЛПолн"))
@@ -273,7 +320,7 @@ def parse_xml(context: Zavod, handle: BinaryIO):
         parse_sole_trader(context, el)
 
 
-def parse(context: Zavod):
+def parse_examples(context: Zavod):
     for inn in ["7709383684", "7704667322", "9710075695"]:
         path = context.fetch_resource("%s.xml" % inn, INN_URL % inn)
         with open(path, "rb") as fh:
@@ -298,7 +345,7 @@ def crawl_index(context: Zavod, url: str) -> Set[str]:
 def crawl_archive(context: Zavod, url: str):
     url_path = urlparse(url).path.lstrip("/")
     path = context.fetch_resource(url_path, url)
-    context.log.info("Crawling: %s" % url_path)
+    context.log.info("Parsing: %s" % url_path)
     with ZipFile(path, "r") as zip:
         for name in zip.namelist():
             if not name.lower().endswith(".xml"):
@@ -313,7 +360,14 @@ def crawl(context: Zavod):
         crawl_archive(context, archive_url)
 
 
+def crawl_parallel(context: Zavod):
+    with ThreadPoolExecutor() as executor:
+        for archive_url in crawl_index(context, PREFIX):
+            executor.submit(crawl_archive, context, archive_url)
+
+
 if __name__ == "__main__":
     with init_context("ru_egrul", "ru") as context:
+        # crawl_parallel(context)
         crawl(context)
-        # parse(context)
+        # parse_examples(context)
