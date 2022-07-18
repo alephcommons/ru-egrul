@@ -2,3 +2,8 @@ data/
 .ipynb_checkpoints/
 __pycache__/
 data1/
+*.json
+*.jsonl
+*.xml
+*.gz
+*.gzip
