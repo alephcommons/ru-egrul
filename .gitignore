@@ -1,4 +1,5 @@
 data/
+data1/
 .ipynb_checkpoints/
 __pycache__/
 data1/
@@ -7,3 +8,4 @@ data1/
 *.xml
 *.gz
 *.gzip
+.DS_Store
