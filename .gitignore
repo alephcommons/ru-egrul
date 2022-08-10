@@ -9,3 +9,4 @@ data1/
 *.gz
 *.gzip
 .DS_Store
+test_notebooks/
