@@ -21,7 +21,8 @@ LOCATION_MAPPING = {
  'region': 'region',
  'area': 'state',
  'city': 'city',
- 'street': 'street'
+ 'street': 'street',
+ 'full': 'full'
 }
 
 IE_MAPPING = {
@@ -47,6 +48,5 @@ PERSONS_MAPPING = {
     'sex': 'gender',
     'email': 'email',
     'country_code': 'country',
-    'full_name': 'name'
-
+    'full_name': "name"
 }
