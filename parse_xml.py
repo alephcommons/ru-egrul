@@ -49,7 +49,7 @@ def make_id(
 
 
 def make_person(context: Zavod, el: Element, local_id: str) -> Optional[EntityProxy]:
-    name_el = el.find("./СвФЛ")
+    name_el = el.find(".//СвФЛ")
     entity = context.make("Person")
     if name_el is None:
         return None
@@ -104,8 +104,9 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
     local_id = company.id
     if meta is not None:
         ownership.add("startDate", meta.get("ДатаЗаписи"))
-        local_id = meta.get("ГРН")
+        local_id = meta.get("ГРН") or local_id
 
+    ownership.add("role", el.tag)
     if el.tag == "УчрФЛ":  # Individual founder
         owner_proxy = make_person(context, el, local_id)
         if owner_proxy is not None:
@@ -134,7 +135,12 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         pb_name_el = el.find("./ВидНаимУчр")
         if pb_name_el is not None:
             # Name of the owning authority
-            ownership.add("role", pb_name_el.get("НаимМО"))
+            pb_name = pb_name_el.get("НаимМО")
+            if pb_name is not None:
+                owner = context.make("Organization")
+                owner.add("name", pb_name)
+                owner.id = make_id(context, owner, local_id)
+            # ownership.add("role", pb_name_el.get("НаимМО"))
 
         # managing body:
         pb_el = el.find("./СвОргОсущПр")
@@ -160,7 +166,7 @@ def parse_founder(context: Zavod, company: EntityProxy, el: Element):
         return
 
     if owner.id is None:
-        context.log.warning("No ID for owner: %s" % company.id, el=tag_text(el))
+        context.log.warning("No ID for owner: %s" % company.id, el=tag_text(el), owner=owner.to_dict())
         return
 
     ownership.id = context.make_id(company.id, owner.id)

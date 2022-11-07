@@ -14,3 +14,6 @@ data/sorted.json: data/fragments.json
 data/fragments.json:
 	python parse_xml.py
 
+clean:
+	rm -rf data/export/egrul.json data/fragments.json data/sorted.json
+
